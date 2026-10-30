@@ -375,6 +375,25 @@ impl World {
             });
             return;
         }
+        if self.player_guid == Some(response.guid)
+            && let Some(attributes) = response.creature_profile.and_then(|c| c.attributes)
+        {
+            self.update_player(|player| {
+                player.apply_server_totals(ac_core::player::ServerTotals {
+                    attributes: [
+                        attributes.strength,
+                        attributes.endurance,
+                        attributes.quickness,
+                        attributes.coordination,
+                        attributes.focus,
+                        attributes.self_,
+                    ],
+                    health_max: response.creature_profile.map_or(0, |c| c.health_max),
+                    stamina_max: attributes.stamina_max,
+                    mana_max: attributes.mana_max,
+                });
+            });
+        }
         if self.items.get(response.guid).is_none() {
             return;
         }

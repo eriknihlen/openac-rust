@@ -635,3 +635,33 @@ fn augmentations_read_from_int_properties() {
     train(&mut s, 208, 0, TRAINED);
     assert_eq!(s.get_effective_skill(SKILL_ID), Some(528));
 }
+
+#[test]
+fn the_servers_totals_replace_the_computed_attributes_and_vital_maxima() {
+    let mut s = LocalPlayerState::new(Some(book(&[10])));
+    s.on_attribute_update(AttributeKind::Coordination.id(), 100, 191, 0);
+    s.on_vital_update(9, 0, 100, 0, 400);
+    assert_eq!(
+        s.get_effective_attribute(AttributeKind::Coordination),
+        Some(291)
+    );
+    s.on_server_totals(ServerTotals {
+        attributes: [0, 0, 0, 402, 0, 0],
+        mana_max: 477,
+        ..ServerTotals::default()
+    });
+    assert_eq!(
+        s.get_effective_attribute(AttributeKind::Coordination),
+        Some(402)
+    );
+    assert_eq!(s.get_max_approx(VitalKind::Mana), Some(477));
+    // The unspelled base stays the character's own.
+    assert_eq!(
+        s.get_attribute(AttributeKind::Coordination)
+            .unwrap()
+            .current(),
+        291
+    );
+    s.clear();
+    assert_eq!(s.server_totals(), None);
+}

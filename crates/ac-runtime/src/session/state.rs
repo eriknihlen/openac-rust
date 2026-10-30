@@ -141,6 +141,9 @@ pub struct SessionState {
     /// login complete instead of sending its own.
     login_release_on_arrival: bool,
     last_tick: Option<Duration>,
+    /// What the server's last totals were asked for: the enchantment
+    /// revision and the attribute values then.
+    self_appraisal_key: Option<(u64, [u32; 6])>,
     /// Passes and the world's simulation time (still while no world is up).
     pub frame_clock: crate::frame_clock::FrameClock,
     /// The physics, the local player's movement and other bodies.
@@ -199,6 +202,7 @@ impl SessionState {
             login_release: false,
             login_release_on_arrival: false,
             last_tick: None,
+            self_appraisal_key: None,
             frame_clock: crate::frame_clock::FrameClock::default(),
             movement: Movement::default(),
             liveness: crate::world::liveness::LivenessController::default(),
@@ -764,6 +768,7 @@ impl SessionState {
         self.login_release_on_arrival = false;
         self.portal_events.clear();
         self.last_tick = None;
+        self.self_appraisal_key = None;
         self.forward();
     }
 
@@ -991,6 +996,7 @@ impl SessionState {
         }
         if in_world {
             self.echo_spellbook();
+            self.refresh_server_totals(outbox, clocks);
             self.options.try_flush_if_auto_save_due(clocks.wall(), |o| {
                 outbox.send_action(|seq| o.build_block(seq));
             });
@@ -1012,6 +1018,34 @@ impl SessionState {
         self.gameplay.tick(&mut ctx);
         self.follow_combat(outbox, in_world, clocks);
         self.forward();
+    }
+
+    /// Asks the server to appraise the character again whenever its
+    /// enchantments or attributes changed, so the sheet shows the totals
+    /// the server computes (its own spell and augmentation rules included).
+    fn refresh_server_totals(&mut self, outbox: &mut Outbox, clocks: Clocks) {
+        let Some(guid) = self.world.player_guid() else {
+            return;
+        };
+        let Some(player) = self.world.player() else {
+            return;
+        };
+        let numbers = player.numbers();
+        let revision = numbers
+            .spellbook()
+            .map_or(0, ac_core::spells::Spellbook::enchantment_revision);
+        let attributes = ac_core::player::AttributeKind::ALL
+            .map(|kind| numbers.get_attribute(kind).map_or(0, |a| a.current()));
+        let key = (revision, attributes);
+        if self.self_appraisal_key == Some(key) || attributes == [0; 6] {
+            return;
+        }
+        if self
+            .inventory
+            .appraise_quietly(guid, clocks.session_ms(), true, outbox)
+        {
+            self.self_appraisal_key = Some(key);
+        }
     }
 
     /// Objects out of range for 25 seconds are forgotten, as the server

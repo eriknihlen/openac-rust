@@ -15,8 +15,8 @@ mod vitae;
 pub use level_progress::LevelProgress;
 pub use local_player::{
     AttributeChange, AttributeKind, AttributeSnapshot, LocalPlayerState, SKILL_JUMP, SKILL_RUN,
-    SkillFormulaBonusResolver, SkillSnapshot, VitalKind, VitalSnapshot, attribute_id_to_kind,
-    vital_id_to_kind,
+    ServerTotals, SkillFormulaBonusResolver, SkillSnapshot, VitalKind, VitalSnapshot,
+    attribute_id_to_kind, vital_id_to_kind,
 };
 pub use skill_formula::{
     LiveSkillCreditResolver, SkillBase, SkillFormula, attribute_name, build_tooltip,

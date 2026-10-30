@@ -129,6 +129,11 @@ impl PlayerState {
         self.numbers.on_vital_current(update.vital, update.current);
     }
 
+    /// The totals from the server's appraisal of the character itself.
+    pub(super) fn apply_server_totals(&mut self, totals: ac_core::player::ServerTotals) {
+        self.numbers.on_server_totals(totals);
+    }
+
     pub(super) fn apply_skill(&mut self, update: &PrivateUpdateSkill) {
         self.numbers.on_skill_wire_update(
             update.skill,

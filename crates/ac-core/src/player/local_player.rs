@@ -171,6 +171,21 @@ impl SkillSnapshot {
     }
 }
 
+/// The totals the server reported for the character in its own appraisal:
+/// attribute values and vital maxima with everything the server applies
+/// (a server's own spell and augmentation rules included).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ServerTotals {
+    /// Each attribute's value, in attribute id order (strength first).
+    pub attributes: [u32; 6],
+    /// Maximum health.
+    pub health_max: u32,
+    /// Maximum stamina.
+    pub stamina_max: u32,
+    /// Maximum mana.
+    pub mana_max: u32,
+}
+
 /// What an attribute update affects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AttributeChange {
@@ -198,6 +213,7 @@ pub struct LocalPlayerState {
     int_properties: BTreeMap<u32, i32>,
     spellbook: Option<Spellbook>,
     skill_formula_bonus_resolver: Option<SkillFormulaBonusResolver>,
+    server_totals: Option<ServerTotals>,
 }
 
 impl std::fmt::Debug for LocalPlayerState {
@@ -210,6 +226,7 @@ impl std::fmt::Debug for LocalPlayerState {
             .field("skills", &self.skills)
             .field("int_properties", &self.int_properties)
             .field("spellbook", &self.spellbook)
+            .field("server_totals", &self.server_totals)
             .field(
                 "skill_formula_bonus_resolver",
                 &self.skill_formula_bonus_resolver.is_some(),
@@ -273,11 +290,28 @@ impl LocalPlayerState {
         self.attributes[kind.index()]
     }
 
+    /// Records the totals from the server's appraisal of the character; they
+    /// stand in for the locally computed attribute values and vital maxima
+    /// until the next appraisal replaces them.
+    pub fn on_server_totals(&mut self, totals: ServerTotals) {
+        self.server_totals = Some(totals);
+    }
+
+    /// The totals the server last reported, if any.
+    #[must_use]
+    pub fn server_totals(&self) -> Option<ServerTotals> {
+        self.server_totals
+    }
+
     /// The attribute after spells (attributes ignore vitae), floored at 1
-    /// below 10 and at 10 otherwise; unenchanted without a spellbook.
+    /// below 10 and at 10 otherwise; unenchanted without a spellbook. The
+    /// server's own total wins when it reported one.
     #[must_use]
     pub fn get_effective_attribute(&self, kind: AttributeKind) -> Option<i32> {
         let base = self.get_attribute(kind)?.current();
+        if let Some(totals) = &self.server_totals {
+            return Some(saturating_i32(totals.attributes[kind.index()]));
+        }
         Some(match &self.spellbook {
             None => base.cast_signed(),
             Some(book) => enchant_attribute(book.get_attribute_mod(kind.id()), base),
@@ -408,6 +442,16 @@ impl LocalPlayerState {
     /// including those reduced by vitae.
     #[must_use]
     pub fn get_max_approx(&self, kind: VitalKind) -> Option<u32> {
+        if let Some(totals) = &self.server_totals {
+            let reported = match kind {
+                VitalKind::Health => totals.health_max,
+                VitalKind::Stamina => totals.stamina_max,
+                VitalKind::Mana => totals.mana_max,
+            };
+            if reported != 0 && self.get(kind).is_some() {
+                return Some(reported);
+            }
+        }
         let unbuffed = self.max_before_secondary_enchantments(kind)?;
         if unbuffed == 0 {
             return Some(0);
@@ -641,6 +685,7 @@ impl LocalPlayerState {
         self.attributes = [None; 6];
         self.skills.clear();
         self.int_properties.clear();
+        self.server_totals = None;
     }
 
     fn attribute_contribution(&self, kind: VitalKind, effective: bool) -> u32 {
