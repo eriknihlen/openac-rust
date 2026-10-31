@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use ac_plugin_ui::{
-    CanvasView, PaintCmd, PluginUiView, PointerEvent, PointerKind, UiInput, canvas_origin,
+    CanvasPlace, CanvasView, PaintCmd, PluginUiView, PointerEvent, PointerKind, UiInput,
+    canvas_origin,
 };
 
 use crate::draw::{Color, DEFAULT_OUTLINE_COLOR, RenderContext};
@@ -37,6 +38,7 @@ pub struct CanvasWidget {
     outbox: PluginOutbox,
     held: Option<u8>,
     releases_seen: u32,
+    place: CanvasPlace,
 }
 
 fn color(c: ac_plugin_ui::Color8) -> Color {
@@ -56,6 +58,7 @@ impl CanvasWidget {
                 modifiers,
                 wheel_delta: wheel,
             },
+            place: self.place,
         });
     }
 
@@ -334,6 +337,10 @@ impl CanvasLayer {
                 canvas.descriptor.height as f32,
             );
             let (x, y) = canvas_origin(canvas.anchor, canvas.offset, size, viewport);
+            let place = CanvasPlace {
+                origin: (x, y),
+                layer: viewport,
+            };
             let el = *self.elements.entry(canvas.id).or_insert_with(|| {
                 let mut e = Element::at(x, y, size.0, size.1).with_anchors(AnchorEdges::NONE);
                 e.name = Some(format!(
@@ -350,6 +357,7 @@ impl CanvasLayer {
                         outbox: std::rc::Rc::clone(outbox),
                         held: None,
                         releases_seen: canvas.release_count,
+                        place,
                     },
                 );
                 OverlayHost::add_to_layer(ui, self.layer, el, true);
@@ -365,6 +373,7 @@ impl CanvasLayer {
             if let Some(w) = ui.widget_mut::<CanvasWidget>(el) {
                 w.canvas = canvas.clone();
                 w.images = images;
+                w.place = place;
                 if w.releases_seen != canvas.release_count {
                     w.releases_seen = canvas.release_count;
                     // The plugin let go: no cancel follows.

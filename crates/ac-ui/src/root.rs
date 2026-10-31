@@ -296,6 +296,8 @@ pub struct UiRoot {
     tooltip_shown_ms: i64,
     now_ms: i64,
     last_mouse_move_ms: i64,
+    /// The modifier keys held, for the pointer's events.
+    modifiers: Modifiers,
 
     active_popup: Option<(ElementId, ElementId)>,
     fixed_canvases: Vec<(u64, (f32, f32))>,
@@ -379,6 +381,7 @@ impl UiRoot {
             tooltip_shown_ms: 0,
             now_ms: 0,
             last_mouse_move_ms: 0,
+            modifiers: Modifiers::NONE,
             active_popup: None,
             fixed_canvases: Vec::new(),
             fixed_canvas: None,
@@ -1214,7 +1217,9 @@ impl UiRoot {
 
     fn event_for(&self, target: ElementId, k: i32) -> UiEvent {
         let source = self.event_id(target);
-        UiEvent::new(source, target, k)
+        let mut event = UiEvent::new(source, target, k);
+        event.modifiers = self.modifiers;
+        event
     }
 
     /// Deliver `e` to the widget of `id` alone; true when handled.
@@ -2137,6 +2142,12 @@ impl UiRoot {
     }
 
     // ── Pointer input ───────────────────────────────────────────────────
+
+    /// The modifier keys now held, which the pointer's events carry from here
+    /// on.
+    pub fn set_modifiers(&mut self, modifiers: Modifiers) {
+        self.modifiers = modifiers;
+    }
 
     /// The pointer moved to window (`x`, `y`).
     pub fn on_mouse_move(&mut self, x: i32, y: i32) {

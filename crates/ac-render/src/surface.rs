@@ -2225,6 +2225,10 @@ impl AttachedWindow {
     /// The modifier keys changed.
     pub(crate) fn modifiers_changed(&mut self, modifiers: ModifiersState) {
         self.modifiers = modifiers;
+        if let Some(ui) = self.ui.as_mut() {
+            ui.host_mut()
+                .set_modifiers(crate::ui::keys::ui_modifiers(modifiers));
+        }
     }
 
     /// The world's keys, after the UI: presses only when the UI let them

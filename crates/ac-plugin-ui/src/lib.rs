@@ -36,10 +36,10 @@ pub use file_images::{FileImage, FileImageLoader, FileImageRead, FileImageResult
 pub use images::{DecodedImage, ImageBudget};
 pub use markup::{MarkupDocument, MarkupError, parse};
 pub use model::{
-    ActionValue, CanvasAnchor, CanvasDescriptor, CanvasView, ClientWindow, ClientWindowAction,
-    Color8, DialogView, ImageSource, ImageView, MapPoint, PaintCmd, PaintRect, PanelDescriptor,
-    PanelView, PluginIcon, PointerEvent, PointerKind, ProjectileSample, UiChange, UiEvent, UiInput,
-    UiOwner, WorldLabel, WorldLine, canvas_origin, window_name,
+    ActionValue, CanvasAnchor, CanvasDescriptor, CanvasPlace, CanvasView, ClientWindow,
+    ClientWindowAction, Color8, DialogView, ImageSource, ImageView, MapPoint, PaintCmd, PaintRect,
+    PanelDescriptor, PanelView, PluginIcon, PointerEvent, PointerKind, ProjectileSample, UiChange,
+    UiEvent, UiInput, UiOwner, WorldLabel, WorldLine, canvas_origin, window_name,
 };
 pub use state::{
     DEFAULT_DIALOG_BUTTONS, MAXIMUM_CANVASES, MAXIMUM_DIALOG_BUTTONS, MAXIMUM_LABEL_TEXT,

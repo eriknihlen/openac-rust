@@ -670,7 +670,7 @@ fn a_canvas_holds_the_pointer_from_press_to_release_and_reports_a_lost_press() {
         .borrow_mut()
         .drain(..)
         .filter_map(|i| match i {
-            UiInput::Pointer { canvas, event } if canvas == id => {
+            UiInput::Pointer { canvas, event, .. } if canvas == id => {
                 Some((event.kind, event.x, event.y))
             }
             _ => None,
@@ -714,6 +714,154 @@ fn a_canvas_holds_the_pointer_from_press_to_release_and_reports_a_lost_press() {
         })
         .collect();
     assert_eq!(kinds, vec![PointerKind::Down, PointerKind::Cancelled]);
+}
+
+#[test]
+fn a_canvas_is_told_which_modifier_keys_each_pointer_event_came_with() {
+    use crate::event::Modifiers;
+    use crate::overlay::OverlayHost;
+    use ac_plugin_ui::{CanvasAnchor, CanvasDescriptor, PluginUiView, PointerKind};
+    let mut state = PluginUi::new();
+    let owner = UiOwner::new("test.canvas", "Canvas");
+    let id = state
+        .register_canvas(
+            &owner,
+            CanvasDescriptor {
+                canvas_id: "hud".into(),
+                width: 100,
+                height: 50,
+                anchor: CanvasAnchor::TopLeft,
+                offset: (200.0, 100.0),
+                start_visible: true,
+                accepts_pointer_input: true,
+            },
+        )
+        .unwrap();
+    assert!(state.listen_canvas("test.canvas", id, true));
+    let mut view = PluginUiView::new();
+    view.apply_all(state.snapshot());
+    let mut host = UiHost::new();
+    host.root.set_size(800.0, 600.0);
+    let mut band = OverlayHost::mount(&mut host.root);
+    let mut layer = canvas::CanvasLayer::mount(&mut host.root, &mut band);
+    let outbox: PluginOutbox = Rc::new(RefCell::new(Vec::new()));
+    let mut no_image = |_: &str, _: u32| None;
+    layer.sync(&mut host.root, &band, &view, &mut no_image, None, &outbox);
+
+    // A Ctrl+drag, ending with Ctrl let go before the button comes up.
+    host.set_modifiers(Modifiers::CTRL);
+    host.mouse_down(MouseButton::Left, 210, 110, 0);
+    host.mouse_move(250, 130);
+    host.set_modifiers(Modifiers::NONE);
+    host.mouse_up(MouseButton::Left, 250, 130, 0);
+    // The wheel with Shift and Alt, and a plain click.
+    host.set_modifiers(Modifiers::SHIFT | Modifiers::ALT);
+    host.mouse_move(210, 110);
+    host.root.on_scroll(1);
+    host.set_modifiers(Modifiers::NONE);
+    host.mouse_down(MouseButton::Left, 210, 110, 0);
+    host.mouse_up(MouseButton::Left, 210, 110, 0);
+    host.pump();
+
+    let events: Vec<(PointerKind, u8)> = outbox
+        .borrow_mut()
+        .drain(..)
+        .filter_map(|i| match i {
+            UiInput::Pointer { event, .. } => Some((event.kind, event.modifiers)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        events,
+        vec![
+            (PointerKind::Down, 2),
+            (PointerKind::Move, 2),
+            (PointerKind::Up, 0),
+            (PointerKind::Wheel, 5),
+            (PointerKind::Down, 0),
+            (PointerKind::Up, 0),
+        ]
+    );
+}
+
+#[test]
+fn a_canvas_dragged_through_the_session_follows_the_pointer_without_overshooting() {
+    // A plugin moves its canvas by where the pointer is from the grabbed
+    // point, as a HUD does. The session and the window each see the other's
+    // news a frame late, which is what a live drag measures.
+    use crate::overlay::OverlayHost;
+    use ac_plugin_ui::{CanvasAnchor, CanvasDescriptor, PluginUiView, PointerKind, UiChange};
+    use std::collections::VecDeque;
+    let mut state = PluginUi::new();
+    let owner = UiOwner::new("test.canvas", "Canvas");
+    let id = state
+        .register_canvas(
+            &owner,
+            CanvasDescriptor {
+                canvas_id: "hud".into(),
+                width: 100,
+                height: 50,
+                anchor: CanvasAnchor::TopLeft,
+                offset: (200.0, 100.0),
+                start_visible: true,
+                accepts_pointer_input: true,
+            },
+        )
+        .unwrap();
+    assert!(state.listen_canvas("test.canvas", id, true));
+    let mut view = PluginUiView::new();
+    view.apply_all(state.snapshot());
+    state.take_changes();
+    let mut host = UiHost::new();
+    host.root.set_size(800.0, 600.0);
+    let mut band = OverlayHost::mount(&mut host.root);
+    let mut layer = canvas::CanvasLayer::mount(&mut host.root, &mut band);
+    let outbox: PluginOutbox = Rc::new(RefCell::new(Vec::new()));
+    let mut no_image = |_: &str, _: u32| None;
+    layer.sync(&mut host.root, &band, &view, &mut no_image, None, &outbox);
+
+    let mut to_session: VecDeque<Vec<UiInput>> = VecDeque::new();
+    let mut to_window: VecDeque<Vec<UiChange>> = VecDeque::new();
+    let mut offset = (200.0_f32, 100.0_f32);
+    let mut grab = None;
+    let mut worst = 0.0_f32;
+    host.mouse_down(MouseButton::Left, 210, 110, 0);
+    for frame in 0..120 {
+        // Moving for a second, then held still for the rest.
+        let step = frame.min(60);
+        let pointer = (210 + step * 4, 110 + step * 2);
+        host.mouse_move(pointer.0, pointer.1);
+        to_session.push_back(outbox.borrow_mut().drain(..).collect());
+        if to_session.len() > 1 {
+            for input in to_session.pop_front().unwrap() {
+                state.input(input);
+            }
+        }
+        for (_, event) in state.take_events() {
+            let event = state.pointer_as_placed_now(event);
+            let ac_plugin_ui::UiEvent::Pointer { event, .. } = event else {
+                continue;
+            };
+            match (event.kind, grab) {
+                (PointerKind::Down, _) => grab = Some((event.x, event.y)),
+                (PointerKind::Move, Some((gx, gy))) => {
+                    offset = (offset.0 + event.x - gx, offset.1 + event.y - gy);
+                    assert!(state.place_canvas("test.canvas", id, None, None, Some(offset)));
+                }
+                _ => {}
+            }
+        }
+        to_window.push_back(state.take_changes());
+        if to_window.len() > 1 {
+            view.apply_all(to_window.pop_front().unwrap());
+            layer.sync(&mut host.root, &band, &view, &mut no_image, None, &outbox);
+        }
+        // The canvas keeps the grabbed point under the pointer, at most late.
+        let target = (pointer.0 as f32 - 10.0, pointer.1 as f32 - 10.0);
+        worst = worst.max(offset.0 - target.0).max(offset.1 - target.1);
+    }
+    assert_eq!(worst, 0.0, "the canvas ran ahead of the pointer");
+    assert_eq!(offset, (440.0, 220.0));
 }
 
 // ── The shelf under the plugin themes (as in OpenAC) ─────────────────────

@@ -453,6 +453,16 @@ pub enum PointerKind {
     Cancelled,
 }
 
+/// Where the window had a canvas when the pointer did something on it: the
+/// window follows the plugin's moves a moment late.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CanvasPlace {
+    /// Its top-left corner on the layer.
+    pub origin: (f32, f32),
+    /// The layer's size.
+    pub layer: (f32, f32),
+}
+
 /// One pointer event on a canvas, in its own pixels (OpenAC
 /// `PluginPointerEvent`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -897,6 +907,8 @@ pub enum UiInput {
         canvas: u32,
         /// What happened.
         event: PointerEvent,
+        /// Where the window had the canvas when it happened.
+        place: CanvasPlace,
     },
     /// Which client windows the window has, and which are shown (bit sets
     /// by [`ClientWindow::bit`]); sent at attach and whenever they change.
@@ -964,6 +976,8 @@ pub enum UiEvent {
         canvas: u32,
         /// What happened.
         event: PointerEvent,
+        /// Where the window had the canvas when it happened.
+        place: CanvasPlace,
     },
     /// One of its hotkeys was pressed (its own id).
     Hotkey(String),

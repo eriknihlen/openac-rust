@@ -7,7 +7,8 @@
 
 use super::*;
 use crate::model::{
-    ActionValue, CanvasAnchor, Color8, PaintRect, PointerEvent, PointerKind, canvas_origin,
+    ActionValue, CanvasAnchor, CanvasPlace, Color8, PaintRect, PointerEvent, PointerKind,
+    canvas_origin,
 };
 use crate::value::BindingKind;
 use crate::view::PluginUiView;
@@ -517,24 +518,96 @@ fn pointer_input_reaches_a_listening_canvas_that_opted_in() {
         wheel_delta: 0,
     };
     // Nobody listens yet: click-through.
-    ui.input(UiInput::Pointer { canvas: map, event });
+    ui.input(UiInput::Pointer {
+        canvas: map,
+        event,
+        place: CanvasPlace::default(),
+    });
     assert!(ui.take_events().is_empty());
     assert!(ui.listen_canvas("edwards.tank", map, true));
     assert!(ui.listen_canvas("edwards.tank", quiet, true));
-    ui.input(UiInput::Pointer { canvas: map, event });
+    ui.input(UiInput::Pointer {
+        canvas: map,
+        event,
+        place: CanvasPlace::default(),
+    });
     ui.input(UiInput::Pointer {
         canvas: quiet,
         event,
+        place: CanvasPlace::default(),
     });
     assert_eq!(
         ui.take_events(),
         vec![(
             "edwards.tank".to_owned(),
-            UiEvent::Pointer { canvas: map, event }
+            UiEvent::Pointer {
+                canvas: map,
+                event,
+                place: CanvasPlace::default(),
+            }
         )]
     );
     assert!(ui.release_canvas_pointer("edwards.tank", map));
     assert_eq!(ui.canvas("edwards.tank", map).unwrap().release_count, 1);
+}
+
+#[test]
+fn a_held_pointer_is_measured_from_where_the_plugin_last_put_the_canvas() {
+    let mut ui = PluginUi::new();
+    let owner = UiOwner::new("edwards.tank", "Tank");
+    let hud = ui
+        .register_canvas(
+            &owner,
+            CanvasDescriptor {
+                canvas_id: "hud".into(),
+                width: 100,
+                height: 50,
+                anchor: CanvasAnchor::TopRight,
+                offset: (-20.0, 30.0),
+                start_visible: true,
+                accepts_pointer_input: true,
+            },
+        )
+        .unwrap();
+    // The window has it at (680, 30) on an 800x600 layer.
+    let place = CanvasPlace {
+        origin: (680.0, 30.0),
+        layer: (800.0, 600.0),
+    };
+    let heard = |ui: &PluginUi, kind| {
+        let event = PointerEvent {
+            kind,
+            x: 15.0,
+            y: 25.0,
+            button: 1,
+            modifiers: 0,
+            wheel_delta: 0,
+        };
+        let event = ui.pointer_as_placed_now(UiEvent::Pointer {
+            canvas: hud,
+            event,
+            place,
+        });
+        let UiEvent::Pointer { event, .. } = event else {
+            panic!("still a pointer event");
+        };
+        (event.x, event.y)
+    };
+    // Nothing moved: as the window measured it.
+    assert_eq!(heard(&ui, PointerKind::Move), (15.0, 25.0));
+    // The plugin moved it, and re-anchored it, as a drag does; the window has
+    // not caught up.
+    assert!(ui.place_canvas(
+        "edwards.tank",
+        hud,
+        None,
+        Some(CanvasAnchor::TopLeft),
+        Some((690.0, 40.0)),
+    ));
+    assert_eq!(heard(&ui, PointerKind::Move), (5.0, 15.0));
+    assert_eq!(heard(&ui, PointerKind::Up), (5.0, 15.0));
+    // A press stays as the player saw it.
+    assert_eq!(heard(&ui, PointerKind::Down), (15.0, 25.0));
 }
 
 #[test]

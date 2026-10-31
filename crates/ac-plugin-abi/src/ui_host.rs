@@ -677,7 +677,7 @@ pub fn event(event: ui::UiEvent) -> Event {
                 ui::ActionValue::IntList(v) => ActionValue::from_int_list(&v),
             },
         }),
-        ui::UiEvent::Pointer { canvas, event } => abi::UiEvent::Pointer(PointerEvent {
+        ui::UiEvent::Pointer { canvas, event, .. } => abi::UiEvent::Pointer(PointerEvent {
             canvas,
             kind: match event.kind {
                 PointerKind::Down => 0,

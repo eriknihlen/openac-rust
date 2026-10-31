@@ -14,8 +14,8 @@ use crate::images::{ImageBudget, ImageTable};
 use crate::markup::{self, normalize_icon};
 use crate::model::{
     CanvasDescriptor, CanvasView, ClientWindow, ClientWindowAction, ImageSource, PaintCmd,
-    PanelDescriptor, PanelView, PluginIcon, ProjectileSample, UiChange, UiEvent, UiInput, UiOwner,
-    WorldLabel, WorldLine,
+    PanelDescriptor, PanelView, PluginIcon, PointerKind, ProjectileSample, UiChange, UiEvent,
+    UiInput, UiOwner, WorldLabel, WorldLine, canvas_origin,
 };
 use crate::value::{BindingSchema, UiValue};
 
@@ -1216,7 +1216,11 @@ impl PluginUi {
                     self.request_visible(i, shown);
                 }
             }
-            UiInput::Pointer { canvas, event } => {
+            UiInput::Pointer {
+                canvas,
+                event,
+                place,
+            } => {
                 let Some(c) = self.canvases.iter().find(|c| c.id == canvas) else {
                     return;
                 };
@@ -1224,8 +1228,14 @@ impl PluginUi {
                     return;
                 }
                 let owner = c.owner.id.clone();
-                self.events
-                    .push((owner, UiEvent::Pointer { canvas, event }));
+                self.events.push((
+                    owner,
+                    UiEvent::Pointer {
+                        canvas,
+                        event,
+                        place,
+                    },
+                ));
             }
             UiInput::ClientWindows { mounted, visible } => {
                 if self.window_attached {
@@ -1279,6 +1289,37 @@ impl PluginUi {
     /// `BufferedUiRegistry.PublishTheme` tells plugins only of a change).
     pub fn take_theme_change(&mut self) -> Option<crate::theme::ThemeKind> {
         std::mem::take(&mut self.theme_changed).then_some(self.theme)
+    }
+
+    /// A held pointer's move or release as the plugin should hear it, just
+    /// before it does: measured from where the plugin last put the canvas,
+    /// not from where the window still had it. A plugin that moves its canvas
+    /// by how far the pointer is from a grabbed point would otherwise count
+    /// each step again until the window caught up, and overshoot. A press
+    /// stays as the player saw it.
+    #[must_use]
+    pub fn pointer_as_placed_now(&self, event: UiEvent) -> UiEvent {
+        let UiEvent::Pointer {
+            canvas,
+            event: mut pointer,
+            place,
+        } = event
+        else {
+            return event;
+        };
+        if matches!(pointer.kind, PointerKind::Move | PointerKind::Up)
+            && let Some(c) = self.canvases.iter().find(|c| c.id == canvas)
+        {
+            let size = (c.descriptor.width as f32, c.descriptor.height as f32);
+            let now = canvas_origin(c.anchor, c.offset, size, place.layer);
+            pointer.x += place.origin.0 - now.0;
+            pointer.y += place.origin.1 - now.1;
+        }
+        UiEvent::Pointer {
+            canvas,
+            event: pointer,
+            place,
+        }
     }
 
     /// What the plugins hear from their UI, oldest first, with the plugin

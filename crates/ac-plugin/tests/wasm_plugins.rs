@@ -1665,6 +1665,7 @@ fn uidemo_keeps_its_ui_in_the_session_with_or_without_a_window() {
             modifiers: 0,
             wheel_delta: 0,
         },
+        place: ac_plugin_ui::CanvasPlace::default(),
     });
     plugins.pump(0.0, Some(1), &mut api);
     let messages = api.messages("openac.uidemo");

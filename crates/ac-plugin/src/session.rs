@@ -1259,6 +1259,10 @@ impl PluginSession {
             else {
                 continue;
             };
+            let event = match api.plugin_ui() {
+                Some(state) => state.pointer_as_placed_now(event),
+                None => event,
+            };
             let (entry, bytes) = encode(
                 &ac_plugin_abi::ui_host::event(event),
                 self.version_of(index),
