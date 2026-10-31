@@ -19,7 +19,8 @@ use ac_dat::objects::{BspNode, GfxObj, Setup};
 use ac_host::settings::{MarkupControlKey, SettingsStore};
 use ac_plugin_ui::control_state::{ControlKey, ControlStateFile, ControlStateStore};
 use ac_plugin_ui::{
-    ClientWindow, ClientWindowAction, ImageSource, MapPoint, PanelView, ThemeKind, UiInput,
+    ClientWindow, ClientWindowAction, ImageSource, MapPoint, MarkerAnchor, PanelView, ThemeKind,
+    UiInput, WorldIconEntry,
 };
 use ac_proto::Quaternion;
 use ac_runtime::session::SessionCommand;
@@ -29,7 +30,7 @@ use ac_ui::draw::{Color, SpriteSizes, TextureRef};
 use ac_ui::font::{DEFAULT_FONT_ID, UiFont};
 use ac_ui::icons::{IconComposer, IconSource, Rgba};
 use ac_ui::import::LayoutSource;
-use ac_ui::overlay::{WorldLabel, WorldLabelAnchor};
+use ac_ui::overlay::{WorldIcon, WorldIconAnchor, WorldLabel, WorldLabelAnchor};
 use ac_ui::panels::projectile_debug::{ProjectileDebugOverlay, ProjectileDebugSample};
 use ac_ui::plugin::canvas::CanvasLayer;
 use ac_ui::plugin::fold::SharedControlState;
@@ -46,12 +47,16 @@ use super::indicator_panels::{
 };
 use super::map_window::MAP_HOUSE_WINDOW;
 use super::options::OPTIONS_WINDOW;
+use super::overlays::Placement;
 use super::social_panels::{JOURNAL_WINDOW, SOCIAL_WINDOW};
 use super::window::{CHARACTER_WINDOW, INVENTORY_WINDOW, RADAR_WINDOW, SPELLBOOK_WINDOW, WindowUi};
 use crate::meshing::flatten_setup;
 use crate::renderer::WorldRenderer;
+use crate::renderer::icon_probes::{IconProbe, IconProbeKey};
 use crate::scene::Scene;
 use crate::world_lines::PlacedLine;
+use crate::world_shapes::{self, PlacedShape, ShapeAnchor};
+use crate::world_triangles::PlacedTriangle;
 
 /// How long a set of projectile markers shows after it arrives.
 pub const PROJECTILE_SAMPLES_SHOWN: Duration = Duration::from_millis(350);
@@ -81,6 +86,16 @@ pub fn client_window_name(window: ClientWindow) -> &'static str {
         ClientWindow::Vitae => VITAE_WINDOW,
         ClientWindow::Radar => RADAR_WINDOW,
     }
+}
+
+/// The first cell number inside a building or dungeon.
+const FIRST_INDOOR_CELL: u32 = 0x0100;
+
+/// A plugin's icon placed this frame: which of the merged icons, and where.
+#[derive(Debug, Clone, Copy)]
+struct PlacedIcon {
+    entry: usize,
+    anchor: WorldIconAnchor,
 }
 
 /// What the window keeps of the plugins' UI.
@@ -127,6 +142,13 @@ pub struct PluginWindowUi {
     pub(super) labels: Vec<WorldLabel>,
     pub(super) anchors: HashMap<u32, WorldLabelAnchor>,
     world_lines: Vec<PlacedLine>,
+    world_triangles: Vec<PlacedTriangle>,
+    world_shapes: Vec<PlacedShape>,
+    /// This frame's icons: none while the portal view hides the world.
+    world_icons: Vec<PlacedIcon>,
+    /// The anchors of the icons hidden behind the world, to test this frame.
+    icon_probes: Vec<IconProbe>,
+    icon_entries: Arc<Vec<WorldIconEntry>>,
     samples: Vec<ProjectileDebugSample>,
     projectile_set: Option<(u64, Instant)>,
     setup_shapes: HashMap<u32, Option<SetupShape>>,
@@ -168,6 +190,21 @@ impl ControlStateFile for ControlStateSettings {
 }
 
 impl PluginWindowUi {
+    /// Where `guid`'s markers hang this frame, kept once per frame.
+    fn keep_anchor(
+        &mut self,
+        world: &WorldRenderer,
+        scene: &Scene,
+        dats: &DatCollection,
+        guid: u32,
+    ) {
+        if !self.anchors.contains_key(&guid)
+            && let Some(anchor) = label_anchor(world, scene, dats, &mut self.setup_shapes, guid)
+        {
+            self.anchors.insert(guid, anchor);
+        }
+    }
+
     /// The store, made on first use (values last the session until a
     /// settings file is given).
     fn control_state(&mut self) -> SharedControlState {
@@ -951,6 +988,32 @@ impl WindowUi {
                 &plugins.outbox,
             );
         }
+        let shown: Vec<WorldIcon> = plugins
+            .world_icons
+            .iter()
+            .filter_map(|placed| {
+                let entry = plugins.icon_entries.get(placed.entry)?;
+                let icon = &entry.icon;
+                Some(WorldIcon {
+                    anchor: placed.anchor,
+                    image: image(&entry.owner, icon.image),
+                    size: icon.size,
+                    tint: rgba_color(icon.tint_rgba),
+                    border: icon.border_rgba.map(rgba_color),
+                    max_range: icon.max_range,
+                })
+            })
+            .collect();
+        if let Some(overlay) = status.overlays.icons_mut() {
+            let anchors = &plugins.anchors;
+            overlay.tick(
+                &mut host.root,
+                &shown,
+                &|id| anchors.get(&id).copied(),
+                &plugins.labels,
+                camera.as_ref(),
+            );
+        }
         let (sets, _) = &view.projectile;
         if plugins.projectile_set.is_none_or(|(seen, _)| seen != *sets) {
             plugins.projectile_set = Some((*sets, now));
@@ -970,8 +1033,28 @@ impl WindowUi {
         &self.plugins.world_lines
     }
 
-    /// The plugins' labels, lines and projectile markers placed in the
-    /// drawing frame from the world as last drawn (none without a world).
+    /// The plugins' world triangles placed in the drawing frame this frame
+    /// (the world renderer draws them in the scene).
+    pub(crate) fn plugin_world_triangles(&self) -> &[PlacedTriangle] {
+        &self.plugins.world_triangles
+    }
+
+    /// The anchors of the plugins' icons that hide behind the world, to test
+    /// in the world pass this frame.
+    pub(crate) fn plugin_icon_probes(&self) -> &[IconProbe] {
+        &self.plugins.icon_probes
+    }
+
+    /// The plugins' ground shapes placed in the drawing frame this frame
+    /// (the world renderer draws them in the scene).
+    pub(crate) fn plugin_world_shapes(&self) -> &[PlacedShape] {
+        &self.plugins.world_shapes
+    }
+
+    /// The plugins' labels, lines, triangles, icons, ground shapes and
+    /// projectile markers placed in the drawing frame from the world as last
+    /// drawn (none without a world, and no labels or icons in the portal
+    /// view).
     pub(crate) fn set_plugin_world(
         &mut self,
         world: Option<&WorldRenderer>,
@@ -983,31 +1066,30 @@ impl WindowUi {
         plugins.labels.clear();
         plugins.anchors.clear();
         plugins.world_lines.clear();
+        plugins.world_triangles.clear();
+        plugins.world_icons.clear();
+        plugins.icon_probes.clear();
+        plugins.world_shapes.clear();
         plugins.samples.clear();
         let (Some(world), Some(scene)) = (world, scene) else {
             return;
         };
-        for label in view.labels.iter() {
-            let [r, g, b, a] = label.color;
-            plugins.labels.push(WorldLabel {
-                object_id: label.object_id,
-                text: label.text.clone(),
-                color: Color::rgba(r, g, b, a),
-                height_offset: label.height_offset,
-                line: u32::try_from(label.line).unwrap_or(0),
-                max_range: label.max_range,
-                outline: label.outline,
-            });
-            if !plugins.anchors.contains_key(&label.object_id)
-                && let Some(anchor) = label_anchor(
-                    world,
-                    scene,
-                    &dats,
-                    &mut plugins.setup_shapes,
-                    label.object_id,
-                )
-            {
-                plugins.anchors.insert(label.object_id, anchor);
+        // Nothing of the world shows in the portal view, so nothing hangs over
+        // it either.
+        let world_shown = !world.portal_hides_world();
+        if world_shown {
+            for label in view.labels.iter() {
+                let [r, g, b, a] = label.color;
+                plugins.labels.push(WorldLabel {
+                    object_id: label.object_id,
+                    text: label.text.clone(),
+                    color: Color::rgba(r, g, b, a),
+                    height_offset: label.height_offset,
+                    line: u32::try_from(label.line).unwrap_or(0),
+                    max_range: label.max_range,
+                    outline: label.outline,
+                });
+                plugins.keep_anchor(world, scene, &dats, label.object_id);
             }
         }
         for line in view.lines.iter() {
@@ -1022,6 +1104,60 @@ impl WindowUi {
                     follow_terrain: line.follow_terrain,
                     width_metres: line.width_metres,
                 });
+            }
+        }
+        for triangle in view.triangles.iter() {
+            let [a, b, c] = triangle
+                .corners
+                .map(|corner| map_point_in_frame(world, corner));
+            if let (Some(a), Some(b), Some(c)) = (a, b, c) {
+                plugins.world_triangles.push(PlacedTriangle {
+                    corners: [a, b, c],
+                    colors: triangle.colors_rgba.map(rgba_unit),
+                });
+            }
+        }
+        plugins.icon_entries = Arc::clone(&view.icons);
+        if world_shown {
+            for (entry, icon) in view.icons.iter().enumerate() {
+                let (anchor, key, at) = match icon.icon.anchor {
+                    MarkerAnchor::None => continue,
+                    MarkerAnchor::Object(id) => {
+                        plugins.keep_anchor(world, scene, &dats, id);
+                        let head = plugins
+                            .anchors
+                            .get(&id)
+                            .map(|a| a.base + Vec3::Z * a.height);
+                        (WorldIconAnchor::Object(id), IconProbeKey::Object(id), head)
+                    }
+                    MarkerAnchor::Position { point, .. } => {
+                        let Some(point) = map_point_in_frame(world, point) else {
+                            continue;
+                        };
+                        (
+                            WorldIconAnchor::Point(point),
+                            IconProbeKey::Entry(entry),
+                            Some(point),
+                        )
+                    }
+                };
+                if icon.icon.hidden_by_world {
+                    let Some(at) = at else {
+                        continue;
+                    };
+                    plugins.icon_probes.push(IconProbe { key, anchor: at });
+                    if world.icon_probe_visible(key) != Some(true) {
+                        continue;
+                    }
+                }
+                plugins.world_icons.push(PlacedIcon { entry, anchor });
+            }
+        }
+        for shape in view.shapes.iter() {
+            if let Some(placed) = shape_anchor(world, scene, shape.anchor)
+                .and_then(|at| world_shapes::place(shape, at, |x, y| world.sample_terrain_z(x, y)))
+            {
+                plugins.world_shapes.push(placed);
             }
         }
         for sample in view.projectile.1.iter() {
@@ -1175,12 +1311,53 @@ impl WindowUi {
     }
 }
 
+/// `0xRRGGBBAA` as red, green, blue and alpha in 0..1.
+fn rgba_unit(rgba: u32) -> [f32; 4] {
+    rgba.to_be_bytes().map(|channel| f32::from(channel) / 255.0)
+}
+
+/// `0xRRGGBBAA` as a colour.
+fn rgba_color(rgba: u32) -> Color {
+    let [r, g, b, a] = rgba_unit(rgba);
+    Color::rgba(r, g, b, a)
+}
+
 /// A map point in the drawing frame: its landblock placed by the world's
 /// floating origin.
 fn map_point_in_frame(world: &WorldRenderer, point: MapPoint) -> Option<Vec3> {
     let (x, y, lx, ly, z) = point.to_landblock()?;
     let cell = (u32::from(x) << 24) | (u32::from(y) << 16) | 1;
     world.frame_position(cell, Vec3::new(lx, ly, z))
+}
+
+/// Where a ground shape's anchor is this frame: an object's base and the
+/// way it faces, a held object's from the pose its holder's hand gives it,
+/// or a fixed position. An object with no cell yet counts as outdoors, so
+/// the height rule alone decides.
+fn shape_anchor(world: &WorldRenderer, scene: &Scene, anchor: MarkerAnchor) -> Option<ShapeAnchor> {
+    match anchor {
+        MarkerAnchor::None => None,
+        MarkerAnchor::Object(guid) => {
+            let object = scene.object_by_guid(guid)?;
+            let placement = super::overlays::placement(world, object)?;
+            let rotation = match placement {
+                Placement::World { rotation, .. } => rotation,
+                Placement::Held(root) => root.to_scale_rotation_translation().1,
+            };
+            Some(ShapeAnchor {
+                centre: placement.base(),
+                heading_degrees: ac_physics::scenery::heading_of(rotation * Vec3::Y),
+                is_outdoor: object
+                    .position
+                    .is_none_or(|pos| pos.cell_id & 0xFFFF < FIRST_INDOOR_CELL),
+            })
+        }
+        MarkerAnchor::Position { point, is_outdoor } => Some(ShapeAnchor {
+            centre: map_point_in_frame(world, point)?,
+            heading_degrees: 0.0,
+            is_outdoor,
+        }),
+    }
 }
 
 /// Where a label over `guid` hangs (OpenAC
@@ -1289,5 +1466,11 @@ mod tests {
             .map(|w| client_window_name(*w))
             .collect();
         assert_eq!(names.len(), ClientWindow::ALL.len());
+    }
+
+    #[test]
+    fn a_triangle_colour_is_red_green_blue_then_alpha() {
+        assert_eq!(rgba_unit(0xFF00_0080), [1.0, 0.0, 0.0, 128.0 / 255.0]);
+        assert_eq!(rgba_unit(0x0000_FFFF), [0.0, 0.0, 1.0, 1.0]);
     }
 }

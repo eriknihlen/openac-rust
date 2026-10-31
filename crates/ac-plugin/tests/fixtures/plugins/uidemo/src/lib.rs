@@ -1,9 +1,9 @@
 //! `uidemo`: the plugin UI end to end. A markup window with bound text, a
 //! meter, a toggle, a slider, a list, a field and buttons; a canvas that
 //! paints shapes, measured text and its own image and takes the pointer;
-//! a world label over the character. All of it is session state: the
-//! plugin runs the same with no window, and a window that attaches later
-//! shows it as it stands.
+//! a world label, a filled triangle, an icon and a ring under the character.
+//! All of it is session state: the plugin runs the same with no window, and
+//! a window that attaches later shows it as it stands.
 //!
 //! - `/uidemo` (or `/uidemo status`) logs and posts what the plugin reads
 //!   back: window shown, controls, canvas, text measure, images, window
@@ -11,7 +11,8 @@
 //! - `/uidemo show` | `hide` shows or hides its window.
 //! - `/uidemo inventory` toggles the client's inventory window (false with
 //!   no window attached).
-//! - `/uidemo label on|off` shows or clears the label over the character.
+//! - `/uidemo label on|off` shows or clears the label, triangle, icon and
+//!   ring.
 //! - `/uidemo rename <text>` sets the title label's text
 //!   (`SetControlLabel`).
 //! - Two hotkeys: `ping` on Ctrl+Shift+P, and `escape` on Escape, which
@@ -20,8 +21,9 @@
 //!   to Ctrl+Shift+O; a press logs `uidemo hotkey <id>`.
 
 use openac_plugin::ui::{
-    ActionValue, Anchor, BindingKind, Canvas, CanvasSpec, ClientWindow, Image, Panel, PanelSpec,
-    UiEvent, label, rgba,
+    ActionValue, Anchor, BindingKind, Canvas, CanvasSpec, ClientWindow, Image, MapPoint,
+    MarkerAnchor, MarkerLayer, Panel, PanelSpec, TriangleLayer, UiEvent, ground_ring, label, rgba,
+    triangle, world_icon,
 };
 use openac_plugin::ui::{PluginKey, chord};
 use openac_plugin::{Event, Host, Plugin, StartInfo};
@@ -59,6 +61,8 @@ pub struct UiDemo {
     canvas_shown: bool,
     character: Option<u32>,
     submitted: Vec<String>,
+    triangles: Option<TriangleLayer>,
+    markers: Option<MarkerLayer>,
 }
 
 const ITEMS: [&str; 4] = ["Mosswart", "Drudge", "Olthoi", "Banderling"];
@@ -139,7 +143,7 @@ impl UiDemo {
         }
     }
 
-    fn show_label(&self, host: &mut Host<'_>) {
+    fn show_label(&mut self, host: &mut Host<'_>) {
         let labels = match (self.label_on, self.character) {
             (true, Some(id)) => {
                 let mut l = label(id, "uidemo");
@@ -152,6 +156,30 @@ impl UiDemo {
             _ => Vec::new(),
         };
         host.show_labels(&labels);
+        self.show_world_drawing(host);
+    }
+
+    /// The world drawing that goes with the label: a triangle near the map's
+    /// centre, and an icon over the character and a ring under it.
+    fn show_world_drawing(&mut self, host: &mut Host<'_>) {
+        let triangles = *self
+            .triangles
+            .get_or_insert_with(|| host.create_triangle_layer());
+        let markers = *self
+            .markers
+            .get_or_insert_with(|| host.create_marker_layer());
+        let shown = self.label_on.then_some(self.character).flatten();
+        let at = |east_west| MapPoint {
+            east_west,
+            north_south: 0.0,
+            elevation: 0.0,
+        };
+        let corners = shown.map(|_| triangle(at(0.0), at(0.01), at(0.02), 0x28DC_285A));
+        triangles.set_triangles(host, corners.as_slice());
+        let icon = shown.map(|id| world_icon(MarkerAnchor::Object(id), self.dot));
+        markers.set_icons(host, icon.as_slice());
+        let ring = shown.map(|id| ground_ring(MarkerAnchor::Object(id), 2.0, 0.2, 0x28DC_2880));
+        markers.set_shapes(host, ring.as_slice());
     }
 
     fn report(&self, host: &mut Host<'_>, why: &str) {

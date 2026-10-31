@@ -416,7 +416,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.2 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.3 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -625,13 +625,13 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.2""#, r#""apiVersion": "1.3""#);
+    edit_manifest(&folder, r#""apiVersion": "1.3""#, r#""apiVersion": "1.4""#);
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.3, but this build supports 1.0..1.2"
+        "plugin 'openac.probe' declares apiVersion 1.4, but this build supports 1.0..1.3"
     );
 }
 
@@ -680,7 +680,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.2""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.3""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -794,7 +794,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.2""#,
+        r#""apiVersion": "1.3""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -828,6 +828,15 @@ fn a_plugin_built_for_api_1_1_loads_with_the_records_it_knew() {
     let (loaded, error) = load_probe_built_for("probe-1-1-new", "1.1", &LAYOUT_SECTION_BYTES);
     assert!(loaded.is_empty());
     assert!(error.unwrap().contains(LAYOUT_REFUSAL));
+}
+
+/// API 1.3 added the world-triangle and marker imports and nothing else: `probe` as
+/// an API 1.2 SDK built it still loads.
+#[test]
+fn a_plugin_built_for_api_1_2_still_loads() {
+    let v1_2 = ApiVersion::new(1, 2);
+    let (loaded, error) = load_probe_built_for("probe-1-2", "1.2", &section_at(v1_2));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
 }
 
 /// Installs the test plugin `name` into `root` as an SDK for API `version`
@@ -1043,7 +1052,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.2 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.3 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -1643,6 +1652,15 @@ fn uidemo_keeps_its_ui_in_the_session_with_or_without_a_window() {
         (labels[0].object_id, labels[0].text.as_str()),
         (0x5000_000B, "uidemo")
     );
+    assert_eq!(api.ui.merged_triangles().len(), 1);
+    let icons = api.ui.merged_icons();
+    assert_eq!(icons.len(), 1);
+    assert_eq!(icons[0].owner, "openac.uidemo");
+    assert_eq!(
+        icons[0].icon.anchor,
+        ac_plugin_ui::MarkerAnchor::Object(0x5000_000B)
+    );
+    assert_eq!(api.ui.merged_shapes().len(), 1);
 
     // The player's input reaches the plugin with its next pump.
     api.ui.input(UiInput::Action {
@@ -2045,7 +2063,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.2""#,
+            r#""apiVersion": "1.3""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),

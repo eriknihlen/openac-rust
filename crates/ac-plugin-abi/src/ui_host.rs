@@ -8,8 +8,9 @@
 use crate::ui::{
     self as abi, ActionValue, BindingKind, CanvasChange, CanvasPaint, CanvasRegistration,
     CanvasSet, CanvasState, ClientWindowRequest, ControlLabel, ControlRef, ControlVisible,
-    EncodedImage, HotkeyRebind, HotkeyRegistration, HotkeyState, ImageInfo, KeyChord, LineSet,
-    PanelRegistration, PanelValues, PointerEvent, RgbaImage, TextSize, UiAction, UiValue, ViewShow,
+    EncodedImage, HotkeyRebind, HotkeyRegistration, HotkeyState, IconSet, ImageInfo, KeyChord,
+    LineSet, MarkerAnchor, PanelRegistration, PanelValues, PointerEvent, RgbaImage, ShapeSet,
+    TextSize, TriangleSet, UiAction, UiValue, ViewShow,
 };
 use crate::{DecodeError, Event, Import, Wire};
 use ac_plugin_ui::{
@@ -294,6 +295,17 @@ fn paint(command: abi::PaintCmd) -> PaintCmd {
         }
         abi::PaintCmd::PushClip(r) => PaintCmd::PushClip(rect(r)),
         abi::PaintCmd::PopClip => PaintCmd::PopClip,
+    }
+}
+
+fn anchor(a: MarkerAnchor) -> ui::MarkerAnchor {
+    match a {
+        MarkerAnchor::None => ui::MarkerAnchor::None,
+        MarkerAnchor::Object(id) => ui::MarkerAnchor::Object(id),
+        MarkerAnchor::Position(p, is_outdoor) => ui::MarkerAnchor::Position {
+            point: point(p),
+            is_outdoor,
+        },
     }
 }
 
@@ -603,6 +615,69 @@ pub fn handle(
         Import::UiLinesRemove => {
             let layer = u32::from_bytes(request).map_err(bad)?;
             state.remove_line_layer(id, layer).to_bytes()
+        }
+        Import::UiTrianglesCreate => state.create_triangle_layer(id).to_bytes(),
+        Import::UiTrianglesSet => {
+            let r = TriangleSet::from_bytes(request).map_err(bad)?;
+            let triangles = r
+                .triangles
+                .into_iter()
+                .map(|t| ui::WorldTriangle {
+                    corners: [point(t.a), point(t.b), point(t.c)],
+                    colors_rgba: [t.color_a, t.color_b, t.color_c],
+                })
+                .collect();
+            state.set_triangles(id, r.layer, triangles).to_bytes()
+        }
+        Import::UiTrianglesRemove => {
+            let layer = u32::from_bytes(request).map_err(bad)?;
+            state.remove_triangle_layer(id, layer).to_bytes()
+        }
+        Import::UiMarkersCreate => state.create_marker_layer(id).to_bytes(),
+        Import::UiMarkersSetIcons => {
+            let r = IconSet::from_bytes(request).map_err(bad)?;
+            let icons = r
+                .icons
+                .into_iter()
+                .map(|i| ui::WorldIcon {
+                    anchor: anchor(i.anchor),
+                    image: i.image,
+                    size: i.size,
+                    tint_rgba: i.tint_rgba,
+                    border_rgba: i.border_rgba,
+                    max_range: i.max_range,
+                    hidden_by_world: i.hidden_by_world,
+                })
+                .collect();
+            state.set_icons(id, r.layer, icons).to_bytes()
+        }
+        Import::UiMarkersSetShapes => {
+            let r = ShapeSet::from_bytes(request).map_err(bad)?;
+            let shapes = r
+                .shapes
+                .into_iter()
+                .map(|s| ui::GroundShape {
+                    anchor: anchor(s.anchor),
+                    kind: match s.kind {
+                        abi::GroundShapeKind::None => ui::GroundShapeKind::None,
+                        abi::GroundShapeKind::Ring => ui::GroundShapeKind::Ring,
+                        abi::GroundShapeKind::Disc => ui::GroundShapeKind::Disc,
+                        abi::GroundShapeKind::Arc => ui::GroundShapeKind::Arc,
+                    },
+                    radius: s.radius,
+                    width: s.width,
+                    start_degrees: s.start_degrees,
+                    sweep_degrees: s.sweep_degrees,
+                    filled: s.filled,
+                    faces_object: s.faces_object,
+                    color_rgba: s.color_rgba,
+                })
+                .collect();
+            state.set_shapes(id, r.layer, shapes).to_bytes()
+        }
+        Import::UiMarkersRemove => {
+            let layer = u32::from_bytes(request).map_err(bad)?;
+            state.remove_marker_layer(id, layer).to_bytes()
         }
         Import::UiProjectileDebug => {
             let samples = Vec::<abi::ProjectileSample>::from_bytes(request).map_err(bad)?;

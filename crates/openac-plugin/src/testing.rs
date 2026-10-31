@@ -468,6 +468,13 @@ impl Transport for FakeHost {
             | Import::UiLinesCreate
             | Import::UiLinesSet
             | Import::UiLinesRemove
+            | Import::UiTrianglesCreate
+            | Import::UiTrianglesSet
+            | Import::UiTrianglesRemove
+            | Import::UiMarkersCreate
+            | Import::UiMarkersSetIcons
+            | Import::UiMarkersSetShapes
+            | Import::UiMarkersRemove
             | Import::UiProjectileDebug
             | Import::UiInputActionsListen => self.ui_call(import, bytes),
             other => other.default_reply(),
@@ -518,7 +525,7 @@ mod tests {
         host.enable(&mut plugin).unwrap();
         assert_eq!(
             host.logs,
-            vec![(LogLevel::Info, "test.recorder on API 1.2".to_owned())]
+            vec![(LogLevel::Info, "test.recorder on API 1.3".to_owned())]
         );
         host.tick(&mut plugin);
         assert!(host.type_line(&mut plugin, " @R waves "));

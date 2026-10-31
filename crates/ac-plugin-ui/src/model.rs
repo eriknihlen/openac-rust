@@ -549,6 +549,130 @@ pub struct WorldLine {
     pub width_metres: f32,
 }
 
+/// A filled triangle in the world, flat between its corners, see-through by
+/// its colours' alpha, drawn from both sides and unlit. It does not follow
+/// the ground.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorldTriangle {
+    /// The corners.
+    pub corners: [MapPoint; 3],
+    /// Each corner's colour, `0xRRGGBBAA`, blended across the face.
+    pub colors_rgba: [u32; 3],
+}
+
+/// What a world marker is pinned to.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum MarkerAnchor {
+    /// Nothing: a marker pinned to nothing is dropped.
+    #[default]
+    None,
+    /// An object, by the id the server gave it. While the client does not
+    /// hold it the marker is not drawn, and it comes back when it does.
+    Object(u32),
+    /// A fixed position.
+    Position {
+        /// Where.
+        point: MapPoint,
+        /// The position is on the landscape, not inside a building or
+        /// dungeon.
+        is_outdoor: bool,
+    },
+}
+
+impl MarkerAnchor {
+    /// Whether it pins something: an object with an id, or a position whose
+    /// coordinates are all finite.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::None => false,
+            Self::Object(id) => *id != 0,
+            Self::Position { point, .. } => {
+                point.east_west.is_finite()
+                    && point.north_south.is_finite()
+                    && point.elevation.is_finite()
+            }
+        }
+    }
+}
+
+/// An image hung in the world at a constant size on the screen. It is drawn
+/// after the world, like a label, so walls and hills do not hide it unless
+/// it asks with `hidden_by_world`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorldIcon {
+    /// Over an object, the client lays its icons out in rows above its head
+    /// and its labels; at a position, the icon is centred on it.
+    pub anchor: MarkerAnchor,
+    /// The plugin's own image.
+    pub image: u32,
+    /// The side of the square the image is fitted into, pixels.
+    pub size: f32,
+    /// Multiplied into the image, `0xRRGGBBAA`.
+    pub tint_rgba: u32,
+    /// A thin frame around the image, `0xRRGGBBAA`.
+    pub border_rgba: Option<u32>,
+    /// Shown up to this many metres away, fading over the last fifth.
+    pub max_range: f32,
+    /// The whole icon goes while walls, doors, hills or anything else in the
+    /// world stands between the camera and its anchor.
+    pub hidden_by_world: bool,
+}
+
+/// An icon with the plugin it belongs to, whose images are the only ones
+/// its image is looked up in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorldIconEntry {
+    /// The plugin.
+    pub owner: String,
+    /// The icon, already checked and with its size in range.
+    pub icon: WorldIcon,
+}
+
+/// What form a ground shape takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GroundShapeKind {
+    /// Nothing: a shape of no kind is dropped.
+    #[default]
+    None,
+    /// A band all the way round the anchor, from the radius less the width
+    /// out to the radius.
+    Ring,
+    /// A circle around the anchor, filled from its centre.
+    Disc,
+    /// Part of a circle: a wedge filled from the centre, or a band like a
+    /// ring's.
+    Arc,
+}
+
+/// A shape lying on the ground around an anchor: a ring under a target, a
+/// disc over an area, a wedge in front of a creature. Drawn in the world,
+/// so walls and hills hide it, and outdoors it follows the slope of the
+/// land.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundShape {
+    /// Around an object's feet, following it, or around a fixed position.
+    pub anchor: MarkerAnchor,
+    /// What form it takes.
+    pub kind: GroundShapeKind,
+    /// The outer radius, metres.
+    pub radius: f32,
+    /// How wide a ring's or unfilled arc's band is, metres, inward from the
+    /// radius.
+    pub width: f32,
+    /// Where an arc starts, as a compass bearing in degrees (0 north, 90
+    /// east); with `faces_object`, from the way the object faces.
+    pub start_degrees: f32,
+    /// How far round an arc goes, clockwise from its start, degrees.
+    pub sweep_degrees: f32,
+    /// An arc filled from the centre, a wedge, rather than a band.
+    pub filled: bool,
+    /// An arc over an object turns with it.
+    pub faces_object: bool,
+    /// Its colour, `0xRRGGBBAA`; the alpha is how opaque it is.
+    pub color_rgba: u32,
+}
+
 /// One step of a simulated projectile flight, for drawing (OpenAC
 /// `PluginProjectileDebugSample`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -818,6 +942,12 @@ pub enum UiChange {
     Labels(Arc<Vec<WorldLabel>>),
     /// Every plugin's world lines, merged.
     Lines(Arc<Vec<WorldLine>>),
+    /// Every plugin's world triangles, merged.
+    Triangles(Arc<Vec<WorldTriangle>>),
+    /// Every plugin's world icons, merged.
+    Icons(Arc<Vec<WorldIconEntry>>),
+    /// Every plugin's ground shapes, merged.
+    Shapes(Arc<Vec<GroundShape>>),
     /// Projectile markers to show for a moment.
     ProjectileDebug(Arc<Vec<ProjectileSample>>),
     /// A plugin asks the window to show, hide or toggle a client window.

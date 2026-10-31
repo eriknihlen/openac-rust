@@ -1074,6 +1074,163 @@ wire_record! {
 }
 
 wire_record! {
+    /// A filled triangle in the world: flat between its corners,
+    /// see-through by its colours' alpha, drawn from both sides and unlit.
+    /// Hills and walls in front of it hide it; it writes no depth, so
+    /// overlapping triangles blend. It does not follow the ground: one
+    /// meant to lie on it is lifted a little (about 0.1 m) by the plugin.
+    /// API 1.3.
+    pub struct WorldTriangle {
+        /// The first corner.
+        pub a: MapPoint,
+        /// The second corner.
+        pub b: MapPoint,
+        /// The third corner.
+        pub c: MapPoint,
+        /// Corner `a`'s colour, `0xRRGGBBAA`; its alpha is how opaque the
+        /// fill is there.
+        pub color_a: u32,
+        /// Corner `b`'s colour, blended across the face.
+        pub color_b: u32,
+        /// Corner `c`'s colour.
+        pub color_c: u32,
+    }
+}
+
+wire_record! {
+    /// A layer's triangles ([`crate::Import::UiTrianglesSet`]); reply
+    /// `bool`. API 1.3.
+    pub struct TriangleSet {
+        /// The layer.
+        pub layer: u32,
+        /// Its triangles from now on (the first 65,536 are kept).
+        pub triangles: Vec<WorldTriangle>,
+    }
+}
+
+wire_enum! {
+    /// What a world marker is pinned to. API 1.3.
+    #[derive(Debug, Clone, PartialEq, Default)]
+    pub enum MarkerAnchor ("marker anchor") {
+        /// Nothing: a marker pinned to nothing is dropped.
+        #[default]
+        None = 0,
+        /// An object, by its id. While the client does not hold it the
+        /// marker is not drawn, and it comes back when it does.
+        Object(object_id: u32) = 1,
+        /// A fixed position, and whether it is on the landscape rather than
+        /// inside a building or dungeon.
+        Position(point: MapPoint, is_outdoor: bool) = 2,
+    }
+}
+
+wire_record! {
+    /// An image hung in the world at a constant size on the screen. It is
+    /// drawn after the world, like a label, so walls and hills do not hide
+    /// it unless it asks with `hidden_by_world`. API 1.3.
+    pub struct WorldIcon {
+        /// Over an object, the client lays its icons out in rows above its
+        /// head and its labels; at a position, the icon is centred on it.
+        pub anchor: MarkerAnchor,
+        /// The image, one of this plugin's own handles. One that is
+        /// released is not drawn.
+        pub image: u32,
+        /// The side of the square the image is fitted into, interface points
+        /// (pixels, except on macOS), kept to 8..=128; an icon whose size is
+        /// not a finite number is dropped.
+        pub size: f32,
+        /// Multiplied into the image, `0xRRGGBBAA`: white leaves it as it
+        /// is, and the alpha is the icon's opacity.
+        pub tint_rgba: u32,
+        /// A thin frame around the image, `0xRRGGBBAA`.
+        pub border_rgba: Option<u32>,
+        /// Shown up to this many metres away, fading over the last fifth;
+        /// an icon whose range is not a positive finite number is dropped.
+        pub max_range: f32,
+        /// The whole icon goes while walls, doors, hills or anything else in
+        /// the world stands between the camera and its anchor. It comes and
+        /// goes a frame or two after the view changes.
+        pub hidden_by_world: bool,
+    }
+}
+
+wire_record! {
+    /// A marker layer's icons ([`crate::Import::UiMarkersSetIcons`]); reply
+    /// `bool`: false, and the layer keeps what it had, when the plugin has
+    /// no such layer or this set and its other layers' icons come to more
+    /// than 256. API 1.3.
+    pub struct IconSet {
+        /// The layer.
+        pub layer: u32,
+        /// Its icons from now on.
+        pub icons: Vec<WorldIcon>,
+    }
+}
+
+wire_enum! {
+    /// What form a ground shape takes. API 1.3.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub enum GroundShapeKind ("ground shape kind") {
+        /// Nothing: a shape of no kind is dropped.
+        #[default]
+        None = 0,
+        /// A band all the way round the anchor, from the radius less the
+        /// width out to the radius.
+        Ring = 1,
+        /// A circle around the anchor, filled from its centre.
+        Disc = 2,
+        /// Part of a circle: a wedge filled from the centre, or a band like
+        /// a ring's.
+        Arc = 3,
+    }
+}
+
+wire_record! {
+    /// A shape lying on the ground around an anchor: a ring under a target,
+    /// a disc over an area, a wedge in front of a creature. Drawn in the
+    /// world, so walls and hills hide it, and outdoors it follows the slope
+    /// of the land. API 1.3.
+    pub struct GroundShape {
+        /// Around an object's feet, following it, or around a fixed position.
+        pub anchor: MarkerAnchor,
+        /// What form it takes.
+        pub kind: GroundShapeKind,
+        /// The outer radius, metres, 0.1 to 100; a shape outside that is
+        /// dropped.
+        pub radius: f32,
+        /// How wide a ring's or unfilled arc's band is, metres, inward from
+        /// the radius: more than zero and at most the radius, or the shape
+        /// is dropped. Not used by discs and filled arcs.
+        pub width: f32,
+        /// Where an arc starts, as a compass bearing in degrees (0 north, 90
+        /// east); with `faces_object`, from the way the object faces.
+        pub start_degrees: f32,
+        /// How far round an arc goes, clockwise from its start, in degrees:
+        /// more than 0 and at most 360, or the arc is dropped.
+        pub sweep_degrees: f32,
+        /// An arc filled from the centre, a wedge, rather than a band.
+        pub filled: bool,
+        /// An arc over an object turns with it.
+        pub faces_object: bool,
+        /// Its colour, `0xRRGGBBAA`; the alpha is how opaque it is.
+        pub color_rgba: u32,
+    }
+}
+
+wire_record! {
+    /// A marker layer's ground shapes
+    /// ([`crate::Import::UiMarkersSetShapes`]); reply `bool`: false, and the
+    /// layer keeps what it had, when the plugin has no such layer or this
+    /// set and its other layers' shapes come to more than 256. API 1.3.
+    pub struct ShapeSet {
+        /// The layer.
+        pub layer: u32,
+        /// Its shapes from now on.
+        pub shapes: Vec<GroundShape>,
+    }
+}
+
+wire_record! {
     /// A projectile marker (OpenAC `PluginProjectileDebugSample`).
     pub struct ProjectileSample {
         /// Where the step ended.

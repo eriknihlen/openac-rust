@@ -156,6 +156,27 @@ macro_rules! import_table {
             /// Remove a line layer.
             UiLinesRemove = ui_lines_remove(u32) -> bool,
                 permission: None, window: false, since: (1, 0);
+            /// A new world-triangle layer.
+            UiTrianglesCreate = ui_triangles_create(()) -> u32,
+                permission: None, window: false, since: (1, 3);
+            /// Replace a layer's triangles.
+            UiTrianglesSet = ui_triangles_set($crate::ui::TriangleSet) -> bool,
+                permission: None, window: false, since: (1, 3);
+            /// Remove a triangle layer.
+            UiTrianglesRemove = ui_triangles_remove(u32) -> bool,
+                permission: None, window: false, since: (1, 3);
+            /// A new world-marker layer.
+            UiMarkersCreate = ui_markers_create(()) -> u32,
+                permission: None, window: false, since: (1, 3);
+            /// Replace a marker layer's icons.
+            UiMarkersSetIcons = ui_markers_set_icons($crate::ui::IconSet) -> bool,
+                permission: None, window: false, since: (1, 3);
+            /// Replace a marker layer's ground shapes.
+            UiMarkersSetShapes = ui_markers_set_shapes($crate::ui::ShapeSet) -> bool,
+                permission: None, window: false, since: (1, 3);
+            /// Remove a marker layer and its markers.
+            UiMarkersRemove = ui_markers_remove(u32) -> bool,
+                permission: None, window: false, since: (1, 3);
             /// Projectile markers to draw for a moment.
             UiProjectileDebug = ui_projectile_debug(Vec<$crate::ui::ProjectileSample>) -> (),
                 permission: None, window: false, since: (1, 0);

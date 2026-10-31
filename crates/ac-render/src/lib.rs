@@ -79,6 +79,8 @@ pub mod work_budget;
 pub mod world_click;
 pub mod world_frame;
 pub mod world_lines;
+pub mod world_shapes;
+pub mod world_triangles;
 
 pub use attach::DetachReason;
 pub use host::{
