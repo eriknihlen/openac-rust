@@ -1316,13 +1316,18 @@ impl Inventory {
         if source.useability.is_none() {
             return false;
         }
-        let compatible = interaction::is_target_compatible(
+        // The pick says what it does, or why it cannot, before anything
+        // else (a mana stone's question comes after the line).
+        match interaction::use_on_target_line(
             &Self::snapshot(&source, ctx),
             &Self::snapshot(&target, ctx),
             ctx.player(),
-        );
-        if !compatible {
-            return false;
+        ) {
+            Ok(line) => self.notices.push(Notice::Interface(line)),
+            Err(failure) => {
+                self.notices.push(Notice::Interface(failure));
+                return false;
+            }
         }
         // An empty mana stone destroys the item it drains: ask first, and
         // never for a retained item.
@@ -1368,7 +1373,13 @@ impl Inventory {
         if object == 0 || !self.ensure_ready(ctx) {
             return false;
         }
-        self.request_use(object, ctx)
+        let sent = self.request_use(object, ctx);
+        // An altar or a rare said yes to is always "Using the <name>".
+        if let Some(name) = ctx.world.item(object).map(|i| i.appropriate_name()) {
+            self.notices
+                .push(Notice::Interface(format!("Using the {name}")));
+        }
+        sent
     }
 
     /// The player said yes to charging a mana stone from an item: the stone
@@ -1470,7 +1481,7 @@ impl Inventory {
                         self.transactions.increment_busy_count(&mut tx);
                     }
                 }
-                K::Reject => {
+                K::Reject | K::Announce => {
                     if let Some(message) = action.message.as_ref().filter(|m| !m.trim().is_empty())
                     {
                         self.notices.push(Notice::Interface(message.clone()));
