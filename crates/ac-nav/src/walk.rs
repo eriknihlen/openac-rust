@@ -3061,7 +3061,10 @@ impl WalkController {
         if request.is_active {
             request.is_active = false;
             request.ended = true;
-            if let Some(driver) = self.driver.take() {
+            if let Some(mut driver) = self.driver.take() {
+                // A walk that ends leaves no move of its drive running
+                // (nothing, for a drive that already ended).
+                self.apply(cx, &driver.cancel());
                 self.retire(request, driver);
             }
         }
