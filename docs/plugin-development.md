@@ -95,7 +95,11 @@ height. It also added `Host::reachable_cells` and its answer,
 hears, and `Host::put_in_open_container`, which puts an owned item into the
 open chest at a slot, or moves one already in it to another. It also added
 `Host::landscape_terrain` and `Host::terrain_palette`, which read the
-landscape from the player's game files for a map. Everything the client offers
+landscape from the player's game files for a map. API 1.6 added plugin
+services, through which plugins built to work together call each other
+([Plugin services](#plugin-services)), with `Event::ServiceChanged` and
+`Callback::ServiceRequest`, which a plugin built for an older version never
+gets. Everything the client offers
 goes through `Host`: game state, items, chat, movement and navigation, trade
 and vendors, storage, network, peers, and UI. `cargo doc -p openac-plugin
 --open` shows the whole surface with its documentation.
@@ -314,6 +318,42 @@ and keep it. A texture that does not decode gives its type an `rgb` of 0.
 Neither call needs a permission; both are empty without the
 game files.
 
+## Plugin services
+
+Plugins built to work together, a suite, call each other through services
+(API 1.6). One plugin offers a service by name and answers it; another calls
+it and waits for the reply. The request and the reply are bytes the two
+plugins agree on; the client never reads them.
+
+The plugin offering it registers the service, `host.register_service_raw("distance",
+"Metres to an object")`, which is then known to every plugin as
+`<plugin id>/distance`. The returned handle comes back in each
+`Callback::ServiceRequest`, which carries the caller's id and the request.
+The plugin answers in `Plugin::callback` with
+`CallbackAnswer::Service(Ok(reply))`, or with `Err(reason)` to refuse. A name
+is 1 to 64 bytes of `a-z`, `0-9` and `-`, and a plugin offers at most 32. The
+service goes when the plugin calls `unregister_service` or stops.
+
+The calling plugin uses `host.call_service_raw("example.navigation/distance",
+&request)`, matching the id ignoring case, and gets the reply's bytes, or a
+`ServiceError` saying why there is none: no such service (`NotFound`), its
+own (`SelfCall`: a plugin calls its own code directly), a call made while
+answering a callback (`Nested`), a request or reply over 64 KiB
+(`TooLarge`), the service refusing (`Refused`), or the service's plugin
+stopping while it answered (`TimedOut`, `Faulted`). What the service says
+about a request, such as "no such object", belongs in its reply.
+`host.services()` lists what is on offer. Every plugin hears
+`Event::ServiceChanged` when a service comes or goes, and a plugin that
+starts first hears one for every service already offered.
+
+An answer runs as the offering plugin's own callback, under its own limits
+([Limits](#limits)): a slow answer warns, and a stuck one stops, the plugin
+that offers the service. The caller's clock stops while it waits.
+
+For state that changes over time and that any plugin may read, such as
+what a plugin is doing now, the status board (`status_publish`,
+`status_read`) fits better than a service.
+
 ## Testing natively
 
 On a native target the SDK has `testing::FakeHost`, which answers every
@@ -343,7 +383,7 @@ Every plugin folder holds a `plugin.json` beside its module:
   "displayName": "Hello",
   "version": "0.1.0",
   "entry": "hello.wasm",
-  "apiVersion": "1.5",
+  "apiVersion": "1.6",
   "minHostVersion": "0.1.0",
   "permissionsVersion": 1,
   "permissions": [
@@ -359,7 +399,7 @@ Every plugin folder holds a `plugin.json` beside its module:
 | `displayName` | The name players see. |
 | `version` | A SemVer 2.0 version (`1.2.0`, `1.3.0-beta.1`). |
 | `entry` | The `.wasm` file, inside the plugin folder. |
-| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.5"`), which must match the version the SDK writes into the module. |
+| `apiVersion` | The plugin API version it was built for, `"MAJOR.MINOR"`: the SDK's `API_CURRENT` (currently `"1.6"`), which must match the version the SDK writes into the module. |
 | `minHostVersion`, `maxHostVersion`, `skipHostVersions` | The client versions it supports or is known broken on. `minHostVersion` is required for a launcher install. |
 | `permissionsVersion` | The permission vocabulary version (`1`); required when `permissions` is present. |
 | `permissions` | What it may do beyond the basics, each with a one-sentence `note` (at most 120 characters) the player reads before installing. |
