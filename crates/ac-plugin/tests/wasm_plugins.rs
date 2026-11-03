@@ -446,7 +446,7 @@ fn hello_runs_its_verb_chat_tick_and_window_events() {
     assert_eq!(
         api.messages("openac.hello"),
         vec![
-            "hello openac.hello enabled on API 1.5 (client 0.1.0), window attached: false",
+            "hello openac.hello enabled on API 1.6 (client 0.1.0), window attached: false",
             "plugin loaded: openac.hello (Hello)",
         ]
     );
@@ -655,13 +655,13 @@ fn a_listed_plugin_that_is_missing_or_unreadable_is_reported() {
 fn an_api_version_this_client_does_not_support_is_refused() {
     let root = Root::new("api");
     let folder = install(&root.0, "probe");
-    edit_manifest(&folder, r#""apiVersion": "1.5""#, r#""apiVersion": "1.6""#);
+    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.7""#);
     let mut api = FakeSession::default();
     let mut plugins = session(&[&root.0], None);
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.probe").unwrap(),
-        "plugin 'openac.probe' declares apiVersion 1.6, but this build supports 1.0..1.5"
+        "plugin 'openac.probe' declares apiVersion 1.7, but this build supports 1.0..1.6"
     );
 }
 
@@ -710,7 +710,7 @@ fn a_status_notice_reaches_only_plugins_built_for_api_1_1() {
 
     let root = Root::new("status-1-0");
     let folder = install(&root.0, "hello");
-    edit_manifest(&folder, r#""apiVersion": "1.5""#, r#""apiVersion": "1.0""#);
+    edit_manifest(&folder, r#""apiVersion": "1.6""#, r#""apiVersion": "1.0""#);
     let wasm = folder.join("hello.wasm");
     let layout = section_at(ApiVersion::new(1, 0));
     let built = std::fs::read(&wasm).unwrap();
@@ -824,7 +824,7 @@ fn load_probe_built_for(tag: &str, version: &str, layout: &[u8]) -> (Vec<String>
     let folder = install(&root.0, "probe");
     edit_manifest(
         &folder,
-        r#""apiVersion": "1.5""#,
+        r#""apiVersion": "1.6""#,
         &format!(r#""apiVersion": "{version}""#),
     );
     let wasm = folder.join("probe.wasm");
@@ -885,6 +885,63 @@ fn a_plugin_built_for_api_1_4_still_loads() {
     let v1_4 = ApiVersion::new(1, 4);
     let (loaded, error) = load_probe_built_for("probe-1-4", "1.4", &section_at(v1_4));
     assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// API 1.6 gave the world-object and hostile-target records the server's
+/// last position at their end: `probe` as an API 1.5 SDK built it still
+/// loads.
+#[test]
+fn a_plugin_built_for_api_1_5_still_loads() {
+    let v1_5 = ApiVersion::new(1, 5);
+    let (loaded, error) = load_probe_built_for("probe-1-5", "1.5", &section_at(v1_5));
+    assert_eq!((loaded, error), (vec!["openac.probe".to_owned()], None));
+}
+
+/// An object change reaches a plugin exactly as its API version encodes
+/// it, through a real module: `rawbytes` built for API 1.5 is handed the
+/// world object without the server's last position (byte for byte the 1.5
+/// encoding); built for this API it gets it.
+#[test]
+fn a_world_objects_server_position_reaches_only_plugins_built_for_api_1_6() {
+    use ac_plugin::abi::world::{ObjectChange, Position, WorldObject};
+    let server = Position::from_cell(0x0032_01D9, [87.35, -10.2, 18.01], 90.0);
+    let event = Event::ObjectChanged(ObjectChange {
+        object_id: 0x8012_D57D,
+        revision: 4,
+        current: Some(WorldObject {
+            object_id: 0x8012_D57D,
+            name: "Drift-Touched Tusker Bull".into(),
+            position: Some(Position::from_cell(0x0032_01DE, [92.7, -19.0, 18.0], 0.0)),
+            server_position: Some(server.clone()),
+            ..WorldObject::default()
+        }),
+        ..ObjectChange::default()
+    });
+    for version in [ApiVersion::new(1, 5), API_CURRENT] {
+        let root = Root::new(&format!("raw-server-position-{version}"));
+        install_built_for(&root.0, "rawbytes", version);
+        let mut api = FakeSession::default();
+        let mut plugins = session(&[&root.0], Some(&["openac.rawbytes"]));
+        plugins.start(&mut api);
+        assert_eq!(plugins.loaded_ids(), ["openac.rawbytes"], "{version}");
+        plugins.queue_event(event.clone());
+        plugins.pump(0.0, None, &mut api);
+        plugins.shutdown(&mut api);
+        let handed = raw_handed(&api, "event");
+        assert_eq!(handed, [event.to_bytes_at(version)], "{version}");
+        let Ok(Event::ObjectChanged(read)) = Event::from_bytes_at(&handed[0], version) else {
+            panic!("{version}: an object change");
+        };
+        let read = read.current.unwrap();
+        assert_eq!(read.name, "Drift-Touched Tusker Bull", "{version}");
+        if version == API_CURRENT {
+            assert_eq!(handed[0], event.to_bytes());
+            assert_eq!(read.server_position, Some(server.clone()));
+        } else {
+            assert!(handed[0].len() < event.to_bytes().len(), "{version}");
+            assert_eq!(read.server_position, None, "{version}");
+        }
+    }
 }
 
 /// A path preview's plan reaches a plugin exactly as its API version
@@ -1338,7 +1395,7 @@ fn an_import_this_client_does_not_have_is_named_at_load() {
     plugins.start(&mut api);
     assert_eq!(
         failed(&plugins.take_reports(), "openac.future").unwrap(),
-        "imports openac.teleport_anywhere, which API 1.5 of this client does not have (the plugin was \
+        "imports openac.teleport_anywhere, which API 1.6 of this client does not have (the plugin was \
          built for API 1.0)"
     );
 }
@@ -2548,7 +2605,7 @@ fn a_new_copy_this_client_cannot_run_leaves_the_running_copy_alone() {
             "requires openAC 9.0.0 or newer (this is 0.1.20)",
         ),
         (
-            r#""apiVersion": "1.5""#,
+            r#""apiVersion": "1.6""#,
             r#""apiVersion": "99.0""#,
             "needs plugin API version 99.0",
         ),
