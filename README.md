@@ -4,6 +4,12 @@
 
 <h1 align="center">openac-rust</h1>
 
+> **This repository has moved to [eriknihlen/OpenAC](https://github.com/eriknihlen/OpenAC).**
+> The Rust client is now developed and released there (from v0.2.0), with its whole history.
+> This repository is archived and read only. Its releases up to v0.1.12 stay here, and a
+> launcher from 0.1.12 on finds the new releases by itself. Pinned git revisions of the plugin
+> SDK keep working from either address.
+
 <p align="center">
   An open-source Asheron's Call client in Rust.<br>
   <strong>The original game's behavior, in a codebase built to be worked on.</strong>
